@@ -11,50 +11,53 @@ import pickle
 
 from login_file import *
 
-url = 'http://humanepa.org/adoption/dogs/'
-adoption_page = requests.get(url)
-soup = BeautifulSoup(adoption_page.content, 'html.parser')
+HUMANE_URL = 'http://humanepa.org/adoption/dogs/'
 
-lancaster_dogs = []
-dog_dict = {}
-new_dogs = []
-adopted_dogs = []
-jpegs = []
+def load_scraper(url):
+    adoption_page = requests.get(url)
+    return BeautifulSoup(adoption_page.content, 'html.parser')
 
-def scrape_captions(): # scrapes all captions from adoption page
+def scrape_captions(soup): # scrapes all captions from adoption page
+    lancaster_dogs = []
     caption_data = soup.find_all('dd') # finds all dog name headers
     for item in caption_data:
         if 'Lancaster' in str(item):
             lancaster_dogs.append(item.string)
+    return lancaster_dogs
 
-def get_dogs(): # creates dictionary of dog names and status
-    for item in lancaster_dogs:
+def get_dogs(names): # creates dictionary of dog names and status
+    dog_dict = {}
+    for item in names:
         if 'adopted' in item.lower():
             name = item[item.find(' '):item.find('(')]
             dog_dict.update({name.strip(): 'adopted'})
         else:
             name = item[:item.find('(')]
             dog_dict.update({name.strip(): 'available'})
+    return dog_dict
 
-def compare_to_current_file():
+def compare_to_current_file(soup, dict):
+    new_dogs = []
+    adopted_dogs = []
     with open('dogdict.txt', 'rb') as f:
         current_file = pickle.load(f)
-        print(current_file)
-        for key, value in dog_dict.items():
+        print('current file: ', current_file)
+        for key, value in dict.items():
             if key not in current_file:
                 new_dogs.append(key)
-                download_images(key)
-                send_email(key, 'New Dog Available!')
+                jpegs = download_images(soup, key)
+                send_email(key, 'New Dog Available!', jpegs)
             elif key in current_file and value != current_file[key]:
                 adopted_dogs.append(key)
-                download_images(key)
-                send_email(key, 'New Adoption!')
+                jpegs = download_images(soup, key)
+                send_email(key, 'New Adoption!', jpegs)
 
-def save_names():  # writes dog_dict to a file
+def save_names(dict):  # writes dog_dict to a file
     with open('dogdict.txt', 'wb') as f:
-        pickle.dump(dog_dict, f, pickle.HIGHEST_PROTOCOL)
+        pickle.dump(dict, f, pickle.HIGHEST_PROTOCOL)
 
-def download_images(dog): #downloads images from site
+def download_images(soup, dog): #downloads images from site
+    jpegs = []
     for link in soup.find_all('img'):
         if dog in str(link):
             image = link.get('src')
@@ -63,8 +66,9 @@ def download_images(dog): #downloads images from site
             jpegs.append(image_name)
             with open(image_name, 'wb') as f:
                 f.write(r2.content)
+    return jpegs
 
-def send_email(dog, subject):
+def send_email(dog, subject, jpegs):
     msg = MIMEMultipart()
     message = str(''.join(dog))
     msg['From'] = 'Humane League'
@@ -82,10 +86,14 @@ def send_email(dog, subject):
     server.send_message(msg)
     server.quit()
 
-while True: #starts timed loop (60 min)
+def main():
     print(datetime.datetime.now())
-    scrape_captions()
-    get_dogs()
-    compare_to_current_file()
-    save_names()
-    time.sleep(3600)
+    soup = load_scraper(HUMANE_URL)
+    names = scrape_captions(soup)
+    dict = get_dogs(names)
+    compare_to_current_file(soup, dict)
+    save_names(dict)
+
+while True: #starts timed loop
+    main()
+    time.sleep(14400) #4 hours
